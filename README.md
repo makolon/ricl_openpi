@@ -1,6 +1,7 @@
 # RICL: Re-training (a VLA) for In-Context Learning
 A RICL version of the openpi repository focused on RICL-Pi0-FAST-DROID.
-[Website](https://ricl-vla.github.io/) | [Arxiv]()
+
+[Website](https://ricl-vla.github.io/) | [Arxiv](https://arxiv.org/abs/2508.02062)
 
 ## Installation
 ```bash
