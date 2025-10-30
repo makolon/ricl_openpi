@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  openpi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ricl-openpi:latest
+    container_name: ricl-openpi
+    
+    # Enable GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - CUDA_HOME=/usr/local/cuda
+      - GIT_LFS_SKIP_SMUDGE=1
+      - UV_LINK_MODE=copy
+      - UV_PROJECT_ENVIRONMENT=/workspace/.venv
+      - PYTHONPATH=/workspace:/workspace/packages/openpi-client/src
+    
+    # Volume mounts
+    volumes:
+      # Mount the entire project directory
+      - .:/workspace
+      # Mount cache directories to speed up operations
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.cache/uv:/root/.cache/uv
+      # Optionally persist .venv across container restarts (comment out if not needed)
+      # - .venv:/workspace/.venv
+    
+    # Working directory
+    working_dir: /workspace
+    
+    # Network mode
+    network_mode: host
+    
+    # Keep container running
+    stdin_open: true
+    tty: true
+    
+    # Command
+    command: /bin/bash
+

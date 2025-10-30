@@ -1,3 +1,53 @@
+# Virtual environments
 .venv
+venv
+ENV
+env
+
+# Model checkpoints and datasets
 checkpoints
 data
+datasets
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Third party
+third_party
+
+# Cache and logs
+.cache
+*.log
+
+# Misc
+.env
+*.bak
