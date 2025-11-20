@@ -66,8 +66,10 @@ Similarly, for retrieval data in a new task at test time, we expect the followin
 
 ## Downloading our datasets
 Priming (training) data: `git clone https://huggingface.co/datasets/ricl-vla/collected_demos_training ./preprocessing/collected_demos_training`
+Pull datasets using git lfs: `cd ./preprocessing/collected_demos_training && git lfs pull`
 
 Retrieval (testing) data in many new tasks: `git clone https://huggingface.co/datasets/ricl-vla/collected_demos ./preprocessing/collected_demos`
+Pull datasets using git lfs: `cd ./preprocessing/collected_demos && git lfs pull`
 
 Both of the above can also be found at [this huggingface link](https://huggingface.co/ricl-vla).
 

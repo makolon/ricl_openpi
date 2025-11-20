@@ -83,11 +83,11 @@ def _load_weights_and_validate(loader: _weight_loaders.WeightLoader, params_shap
 def count_parameters(params, trainable_filter):
     """Counts total and trainable parameters."""
     total_params = sum(p.size for p in jax.tree_util.tree_leaves(params))
-    
+
     trainable_params = sum(
         p.size for p in jax.tree_util.tree_leaves(params.filter(trainable_filter))
     )
-    
+
     return total_params, trainable_params
 
 
@@ -99,7 +99,7 @@ def init_train_state(
 
     def init(rng: at.KeyArrayLike, partial_params: at.Params | None = None) -> training_utils.TrainState:
         rng, model_rng = jax.random.split(rng)
-        # initialize the model (and its parameters).
+        # Initialize the model (and its parameters).
         model = config.model.create(model_rng)
 
         # Merge the partial params into the model.
@@ -141,7 +141,7 @@ def init_train_state(
     # Initialize the train state and mix in the partial params.
     train_state = jax.jit(
         init,
-        donate_argnums=(1,),  # donate the partial params buffer.
+        donate_argnums=(1,),  # Donate the partial params buffer.
         in_shardings=replicated_sharding,
         out_shardings=state_sharding,
     )(init_rng, partial_params)
@@ -150,13 +150,13 @@ def init_train_state(
 
 
 def create_decode_indices(config: _config.TrainConfig) -> at.Int[at.Array, "decode_len"]:
-    # create the indices to decide which tokens to decode: i.e. only those belonging to each retrieved/query "prompt, state, action" prompt and not the images
-    image_token_len = 256*2 # number of image tokens times number of images
-    prompt_token_len = config.model.max_token_len # max token len for each retrieved/query "prompt, state, action" prompt
+    # Create the indices to decide which tokens to decode: i.e. only those belonging to each retrieved/query "prompt, state, action" prompt and not the images
+    image_token_len = 256 * 2  # Number of image tokens times number of images
+    prompt_token_len = config.model.max_token_len  # Max token len for each retrieved/query "prompt, state, action" prompt
     total_token_len = image_token_len + prompt_token_len
     decode_indices = []
     for i in range(config.model.num_retrieved_observations + 1):
-        decode_indices.extend(list(range(i * total_token_len + image_token_len + 1, (i+1) * total_token_len)))
+        decode_indices.extend(list(range(i * total_token_len + image_token_len + 1, (i + 1) * total_token_len)))
     decode_indices = jnp.asarray(decode_indices)
     print(f'decode_indices shape: {decode_indices.shape}')
     return decode_indices
@@ -227,8 +227,7 @@ def main(config: _config.TrainConfig):
 
     if config.batch_size % jax.device_count() != 0:
         raise ValueError(
-            f"Batch size {config.batch_size} must be divisible by the number of devices {jax.device_count()}."
-        )
+            f"Batch size {config.batch_size} must be divisible by the number of devices {jax.device_count()}.")
 
     jax.config.update("jax_compilation_cache_dir", str(epath.Path("~/.cache/jax").expanduser()))
 
