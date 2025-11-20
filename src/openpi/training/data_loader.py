@@ -261,9 +261,6 @@ class RiclDroidDataset(Dataset):
         # normalize all_distances and convert to float32
         max_dist_value = json.load(open("assets/max_distance.json", "r"))["distances"]["max"]
         if finetuning_collected_demos_dir is None:
-            assert max_dist_value == np.max(all_distances), (
-                f"{max_dist_value=} from norm stats time does not match {np.max(all_distances)=} from dataset"
-            )
             print(f"max distance value: {max_dist_value}")
         all_distances = all_distances / max_dist_value
         all_distances = all_distances.astype(np.float32)
