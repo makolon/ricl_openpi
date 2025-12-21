@@ -140,3 +140,16 @@ Run the client on the laptop connected to the franka droid robot to test the fin
 
 ## Credits
 This repository is based on the [openpi](https://github.com/openai/openpi) repository, without which this work would not have been possible.
+
+## To test ICL & Retrieval performance 
+
+```
+uv run examples/droid/eval_retrieval_ablation.py \
+  --args.checkpoint-dir checkpoints/pi0_fast_droid_ricl/exp/10000 \
+  --args.demos-dir ricl_droid_preprocessing/collected_demos_training \
+  --args.eval-demos-dir ricl_droid_preprocessing/collected_demos_eval \
+  --args.retrieval-strategies knn random none \
+  --args.csv-out data/droid/results/retrieval_ablation.csv \
+  --args.plot-out data/droid/results/retrieval_ablation.png \
+  --args.max-episodes 20 --args.max-steps-per-episode 100
+```

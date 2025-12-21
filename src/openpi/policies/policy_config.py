@@ -89,6 +89,8 @@ def create_trained_ricl_policy(
     checkpoint_dir: str,
     demos_dir: str,
     norm_stats: dict[str, transforms.NormStats] | None = None,
+    retrieval_strategy: str = "knn",
+    retrieval_seed: int | None = None,
 ) -> _policy.RiclPolicy:
     """Create a ricl policy from a trained checkpoint.
 
@@ -98,6 +100,8 @@ def create_trained_ricl_policy(
         demos_dir: The directory to load the demos from.
         norm_stats: The norm stats to use for the policy. If not provided, the norm stats will be loaded
             from the checkpoint directory.
+        retrieval_strategy: How to pick in-context demos at inference (knn, random, none).
+        retrieval_seed: Seed for random retrieval (when applicable).
     """
     logging.info("Loading model...")
     model = train_config.model.load(_model.restore_params(f"{checkpoint_dir}/params", dtype=jnp.bfloat16))
@@ -119,12 +123,14 @@ def create_trained_ricl_policy(
         ],
         output_transforms=[
             *data_config.model_transforms.outputs,
-            transforms.UnnormalizeRicl(norm_stats, use_quantiles=data_config.use_quantile_norm),
-            *data_config.data_transforms.outputs,
-        ],
-        metadata=train_config.policy_metadata,
-        demos_dir=demos_dir,
-        use_action_interpolation=train_config.model.use_action_interpolation,
-        lamda=train_config.model.lamda,
-        action_horizon=train_config.model.action_horizon,
+        transforms.UnnormalizeRicl(norm_stats, use_quantiles=data_config.use_quantile_norm),
+        *data_config.data_transforms.outputs,
+    ],
+    metadata=train_config.policy_metadata,
+    demos_dir=demos_dir,
+    use_action_interpolation=train_config.model.use_action_interpolation,
+    lamda=train_config.model.lamda,
+    action_horizon=train_config.model.action_horizon,
+    retrieval_strategy=retrieval_strategy,
+    retrieval_seed=retrieval_seed,
     )

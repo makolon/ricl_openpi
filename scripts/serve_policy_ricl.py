@@ -56,11 +56,20 @@ class Args:
     # Specifies how to load the policy. If not provided, the default policy for the environment will be used.
     policy: Checkpoint | Default = dataclasses.field(default_factory=Default)
 
+    # Retrieval behaviour for in-context examples. Options: "knn", "random", "none".
+    retrieval_strategy: str = "knn"
+    # Seed for random retrieval sampling (used when retrieval_strategy == "random").
+    retrieval_seed: int | None = None
+
 
 def create_policy(args: Args) -> _policy.Policy:
     """Create a policy from the given arguments."""
     return _policy_config.create_trained_ricl_policy(
-        _config.get_config(args.policy.config), args.policy.dir, demos_dir=args.policy.demos_dir
+        _config.get_config(args.policy.config),
+        args.policy.dir,
+        demos_dir=args.policy.demos_dir,
+        retrieval_strategy=args.retrieval_strategy,
+        retrieval_seed=args.retrieval_seed,
     )
 
 
@@ -74,7 +83,7 @@ def main(args: Args) -> None:
 
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
-    logging.info("Creating server (host: %s, ip: %s)", hostname, local_ip)
+    print(f"Creating server (host: {hostname}, ip: {local_ip})")
 
     server = websocket_policy_server.WebsocketPolicyServer(
         policy=policy,

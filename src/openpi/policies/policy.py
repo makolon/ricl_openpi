@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import enum
 import logging
 import pathlib
 from typing import Any, TypeAlias
@@ -25,6 +26,24 @@ import json
 from PIL import Image
 logger = logging.getLogger()
 BasePolicy: TypeAlias = _base_policy.BasePolicy
+
+
+class RetrievalStrategy(str, enum.Enum):
+    """Controls how retrieval examples are selected at inference time."""
+
+    KNN = "knn"  # default behaviour: nearest neighbors via FAISS index
+    RANDOM = "random"  # random samples from the demo pool
+    NONE = "none"  # do not use demos; fill retrieved slots with blanks
+
+
+def _load_processed_demo(path: str) -> np.lib.npyio.NpzFile:
+    try:
+        return np.load(path, allow_pickle=False)
+    except ValueError as exc:
+        if "pickled data" not in str(exc):
+            raise
+        logger.warning("Processed demo %s contains pickled data; reloading with allow_pickle=True", path)
+        return np.load(path, allow_pickle=True)
 
 
 class Policy(BasePolicy):
@@ -99,6 +118,8 @@ class RiclPolicy(BasePolicy):
         use_action_interpolation: bool | None = None,
         lamda: float | None = None,
         action_horizon: int | None = None,
+        retrieval_strategy: str | RetrievalStrategy = RetrievalStrategy.KNN,
+        retrieval_seed: int | None = None,
     ):
         self._sample_actions = nnx_utils.module_jit(model.sample_actions)
         self._input_transform = _transforms.compose(transforms)
@@ -110,14 +131,24 @@ class RiclPolicy(BasePolicy):
         self._use_action_interpolation = use_action_interpolation
         self._lamda = lamda
         self._action_horizon = action_horizon
+        self._retrieval_strategy = RetrievalStrategy(retrieval_strategy)
+        self._retrieval_rng = np.random.default_rng(retrieval_seed)
         # setup demos for retrieval
         print()
         logger.info(f'loading demos from {demos_dir}...')
-        self._demos = {demo_idx: np.load(f"{demos_dir}/{folder}/processed_demo.npz") for demo_idx, folder in enumerate(os.listdir(demos_dir)) if os.path.isdir(f"{demos_dir}/{folder}")}
+        demo_folders = [folder for folder in sorted(os.listdir(demos_dir)) if os.path.isdir(f"{demos_dir}/{folder}")]
+        self._demos = {
+            demo_idx: _load_processed_demo(f"{demos_dir}/{folder}/processed_demo.npz")
+            for demo_idx, folder in enumerate(demo_folders)
+        }
+        if not self._demos:
+            raise ValueError(f"No demos found in {demos_dir}")
         self._all_indices = np.array([(ep_idx, step_idx) for ep_idx in list(self._demos.keys()) for step_idx in range(self._demos[ep_idx]["actions"].shape[0])])
         _all_embeddings = np.concatenate([self._demos[ep_idx]["top_image_embeddings"] for ep_idx in list(self._demos.keys())])
         assert _all_embeddings.shape == (len(self._all_indices), EMBED_DIM), f"{_all_embeddings.shape=}"
         self._knn_k = self._model.num_retrieved_observations
+        self._action_dim = next(iter(self._demos.values()))["actions"].shape[-1]
+        self._blank_prompt = ""
         print()
         logger.info(f'building retrieval index...')
         self._knn_index, knn_index_infos = build_index(embeddings=_all_embeddings, # Note: embeddings have to be float to avoid errors in autofaiss / embedding_reader!
@@ -134,15 +165,73 @@ class RiclPolicy(BasePolicy):
         self._dinov2 = load_dinov2()
         self._max_dist = json.load(open(f"assets/max_distance.json", 'r'))['distances']['max']
         print(f'self._max_dist: {self._max_dist} [helpful to carefully check this value in case of any issues]')
+        # cache shapes for "blank" retrievals
+        sample_demo = next(iter(self._demos.values()))
+        self._blank_top_image = np.zeros_like(sample_demo["top_image"][0])
+        self._blank_right_image = np.zeros_like(sample_demo["right_image"][0])
+        self._blank_wrist_image = np.zeros_like(sample_demo["wrist_image"][0])
+        self._blank_state = np.zeros_like(sample_demo["state"][0])
+        self._blank_actions = np.zeros((self._action_horizon, self._action_dim), dtype=np.float32)
+
+    def _select_retrieved_indices(
+        self, strategy: RetrievalStrategy, query_embedding: np.ndarray | None
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """Select retrieved indices based on the configured strategy.
+
+        Returns:
+            retrieved_indices: shape (1, k, 2) or None when strategy is NONE.
+            distances: distances to first retrieved/query for interpolation or None.
+        """
+        if strategy is RetrievalStrategy.NONE:
+            return None, None
+
+        if strategy is RetrievalStrategy.RANDOM:
+            population = len(self._all_indices)
+            replace = population < self._knn_k
+            random_choices = self._retrieval_rng.choice(population, size=self._knn_k, replace=replace)
+            retrieved_indices = self._all_indices[random_choices][np.newaxis, ...]
+            return retrieved_indices, None
+
+        # Default KNN retrieval
+        if query_embedding is None:
+            raise ValueError("query_embedding is required for knn retrieval")
+        topk_distance, topk_indices = self._knn_index.search(query_embedding, self._knn_k)
+        return self._all_indices[topk_indices], topk_distance
+
+    def _build_blank_retrieval(self) -> dict:
+        """Build empty retrieval slots to simulate 'no context'."""
+        more_obs: dict[str, Any] = {"inference_time": True}
+        for ct in range(self._knn_k):
+            more_obs[f"retrieved_{ct}_top_image"] = self._blank_top_image
+            more_obs[f"retrieved_{ct}_right_image"] = self._blank_right_image
+            more_obs[f"retrieved_{ct}_wrist_image"] = self._blank_wrist_image
+            more_obs[f"retrieved_{ct}_state"] = self._blank_state
+            more_obs[f"retrieved_{ct}_actions"] = self._blank_actions
+            more_obs[f"retrieved_{ct}_prompt"] = self._blank_prompt
+        if self._use_action_interpolation:
+            exp_lamda = np.zeros((self._knn_k + 1, 1), dtype=np.float32)
+            exp_lamda[-1, 0] = 1.0  # let the query dominate when no context is provided
+            more_obs["exp_lamda_distances"] = exp_lamda
+        return more_obs
 
     def retrieve(self, obs: dict) -> dict:
         more_obs = {"inference_time": True}
+        # Choose retrieval strategy (can be overridden per-request)
+        strategy_value = obs.pop("retrieval_strategy", self._retrieval_strategy)
+        strategy = (
+            strategy_value
+            if isinstance(strategy_value, RetrievalStrategy)
+            else RetrievalStrategy(strategy_value)
+        )
+        if strategy is RetrievalStrategy.NONE:
+            return {**obs, **self._build_blank_retrieval()}
+
         # embed
         query_embedding = embed(obs["query_top_image"], self._dinov2)
         assert query_embedding.shape == (1, EMBED_DIM), f"{query_embedding.shape=}"
-        # retrieve
-        topk_distance, topk_indices = self._knn_index.search(query_embedding, self._knn_k)
-        retrieved_indices = self._all_indices[topk_indices]
+        # retrieve indices
+        retrieved_indices, _ = self._select_retrieved_indices(strategy, query_embedding)
+        assert retrieved_indices is not None, "retrieved_indices should not be None for non-NONE strategy"
         assert retrieved_indices.shape == (1, self._knn_k, 2), f"{retrieved_indices.shape=}"
         # collect retrieved info
         for ct, (ep_idx, step_idx) in enumerate(retrieved_indices[0]):
