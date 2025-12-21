@@ -81,17 +81,27 @@ class FakeDataset(Dataset):
 
     def __len__(self) -> int:
         return self._num_samples
-    
+
 
 def get_action_chunk(action_joint_vels, action_gripper_pos, step_idx, action_horizon):
     num_steps = len(action_joint_vels)
     assert action_joint_vels.shape == (num_steps, 7) and action_gripper_pos.shape == (num_steps, 1)
     action_chunk = []
     for i in range(action_horizon):
-        if step_idx+i < num_steps:
-            action_chunk.append(np.concatenate([action_joint_vels[step_idx+i], action_gripper_pos[step_idx+i]], axis=0))
+        if step_idx + i < num_steps:
+            action_chunk.append(
+                np.concatenate([action_joint_vels[step_idx + i], action_gripper_pos[step_idx + i]], axis=0)
+            )
         else:
-            action_chunk.append(np.concatenate([np.zeros(action_joint_vels.shape[-1], dtype=np.float32), action_gripper_pos[-1]], axis=0))
+            action_chunk.append(
+                np.concatenate(
+                    [
+                        np.zeros(action_joint_vels.shape[-1], dtype=np.float32),
+                        action_gripper_pos[-1],
+                    ],
+                    axis=0,
+                )
+            )
     action_chunk = np.stack(action_chunk, axis=0)
     assert action_chunk.shape == (action_horizon, 8), f"{action_chunk.shape=}"
     return action_chunk
@@ -100,14 +110,17 @@ def get_action_chunk(action_joint_vels, action_gripper_pos, step_idx, action_hor
 class Pi0FastDroidFinetuneDataset(Dataset):
     def __init__(self, model_config: _pi0_fast_ricl.Pi0FASTRiclConfig, finetuning_collected_demos_dir: str | None):
         assert finetuning_collected_demos_dir is not None
-        collected_demos_infos = {k: json.load(open(f"{finetuning_collected_demos_dir}/{k}.json")) for k in ['ep_idxs_to_fol', 'fols_to_ep_idxs', 'groups_to_ep_fols', 'groups_to_ep_idxs']}
-        
+        collected_demos_infos = {
+            k: json.load(open(f"{finetuning_collected_demos_dir}/{k}.json"))
+            for k in ["ep_idxs_to_fol", "fols_to_ep_idxs", "groups_to_ep_fols", "groups_to_ep_idxs"]
+        }
+
         # files from the collected demos for training
-        indices_files = [] 
+        indices_files = []
         for group_name, ep_fols in collected_demos_infos["groups_to_ep_fols"].items():
             for ep_fol in ep_fols:
-                indices_files.append(f"ricl_droid_preprocessing/{ep_fol}/indices_and_distances.npz")
-        
+                indices_files.append(f"preprocessing/{ep_fol}/indices_and_distances.npz")
+
         # actual loading...
         count_collected_demos = 0
         all_query_indices = []
@@ -116,7 +129,9 @@ class Pi0FastDroidFinetuneDataset(Dataset):
             query_indices = indices_and_dists["query_indices"]
             num_steps = query_indices.shape[0]
             assert query_indices.shape == (num_steps, 2) and query_indices.dtype == np.int32
-            expected_query_indices = np.array([[100000+file_idx, i] for i in range(num_steps)], dtype=np.int32)
+            expected_query_indices = np.array(
+                [[100000 + file_idx, i] for i in range(num_steps)], dtype=np.int32
+            )
             assert np.allclose(query_indices, expected_query_indices), f"{query_indices=}, {expected_query_indices=}"
             all_query_indices.append(query_indices)
             count_collected_demos += num_steps
@@ -127,13 +142,16 @@ class Pi0FastDroidFinetuneDataset(Dataset):
         assert len_dataset == count_collected_demos
         assert all_query_indices.shape == (len_dataset, 2) and all_query_indices.dtype == np.int32
 
-        # load all data paths 
+        # load all data paths
         all_ep_idxs = list(np.unique(all_query_indices[:, 0]))
-        all_ep_data_paths = {ep_idx: 
-                                    f"ricl_droid_preprocessing/{collected_demos_infos['ep_idxs_to_fol'][str(ep_idx)]}/processed_demo.npz"
-                            for ep_idx in all_ep_idxs}
-        common_prompt = " ".join(collected_demos_infos['ep_idxs_to_fol']['100000'].split("/")[1].split("_")[1:])
-        print(f'num episodes: {len(all_ep_idxs)}')
+        all_ep_data_paths = {
+            ep_idx: f"preprocessing/{collected_demos_infos['ep_idxs_to_fol'][str(ep_idx)]}/processed_demo.npz"
+            for ep_idx in all_ep_idxs
+        }
+        common_prompt = " ".join(
+            collected_demos_infos["ep_idxs_to_fol"]["100000"].split("/")[1].split("_")[1:]
+        )
+        print(f"num episodes: {len(all_ep_idxs)}")
         print(f"common_prompt: {common_prompt}")
 
         # save
@@ -146,12 +164,19 @@ class Pi0FastDroidFinetuneDataset(Dataset):
     def __getitem__(self, index: SupportsIndex) -> dict:
         query_ep_idx, query_step_idx = self.all_query_indices[index, :]
         ep_data = np.load(self.all_ep_data_paths[query_ep_idx])
-        data = {'observation/exterior_image_1_left': ep_data['right_image'][query_step_idx],
-                'observation/wrist_image_left': ep_data['wrist_image'][query_step_idx],
-                'observation/joint_position': ep_data['state'][query_step_idx][:-1],
-                'observation/gripper_position': ep_data['state'][query_step_idx][-1:],
-                'actions': get_action_chunk(ep_data['actions'][:, :-1], ep_data['actions'][:, -1:], query_step_idx, self.action_horizon),
-                'prompt': self.common_prompt}
+        data = {
+            "observation/exterior_image_1_left": ep_data["right_image"][query_step_idx],
+            "observation/wrist_image_left": ep_data["wrist_image"][query_step_idx],
+            "observation/joint_position": ep_data["state"][query_step_idx][:-1],
+            "observation/gripper_position": ep_data["state"][query_step_idx][-1:],
+            "actions": get_action_chunk(
+                ep_data["actions"][:, :-1],
+                ep_data["actions"][:, -1:],
+                query_step_idx,
+                self.action_horizon,
+            ),
+            "prompt": self.common_prompt,
+        }
         return data
 
     def __len__(self) -> int:
@@ -164,33 +189,50 @@ class RiclDroidDataset(Dataset):
         num_retrieved_observations = model_config.num_retrieved_observations
         knn_k = 100
         assert num_retrieved_observations <= knn_k
-        embedding_type = "embeddings__wrist_image_left" # retrieval based on embeddings of wrist images
-        indices_and_dists_fol = f"ricl_droid_preprocessing/droid_new_broken_up_indices_and_distances/chosenIDscene_id_numepisodes20_embtype{embedding_type}_knnk100"
-        outer_dir = "ricl_droid_preprocessing/collected_demos_training" if finetuning_collected_demos_dir is None else finetuning_collected_demos_dir
-        collected_demos_infos = {k: json.load(open(f"{outer_dir}/{k}.json")) for k in ['ep_idxs_to_fol', 'fols_to_ep_idxs', 'groups_to_ep_fols', 'groups_to_ep_idxs']}
+        embedding_type = "embeddings__wrist_image_left"  # retrieval based on embeddings of wrist images
+        indices_and_dists_fol = (
+            f"preprocessing/droid_new_broken_up_indices_and_distances/"
+            f"chosenIDscene_id_numepisodes20_embtype{embedding_type}_knnk100"
+        )
+        outer_dir = (
+            "preprocessing/collected_demos_training"
+            if finetuning_collected_demos_dir is None
+            else finetuning_collected_demos_dir
+        )
+        collected_demos_infos = {
+            k: json.load(open(f"{outer_dir}/{k}.json"))
+            for k in ["ep_idxs_to_fol", "fols_to_ep_idxs", "groups_to_ep_fols", "groups_to_ep_idxs"]
+        }
         # load indices_and_dists
         all_retrieved_indices = []
         all_query_indices = []
         all_distances = []
-        
+
         ## files from the droid dataset
         # indices_files = os.listdir(indices_and_dists_fol)
         # indices_files = [os.path.join(indices_and_dists_fol, f) for f in indices_files]
-        indices_files = [] ## no files from droid dataset
+        indices_files = []  ## no files from droid dataset
 
         # files from the collected demos for training
         for group_name, ep_fols in collected_demos_infos["groups_to_ep_fols"].items():
             for ep_fol in ep_fols:
-                indices_files.append(f"ricl_droid_preprocessing/{ep_fol}/indices_and_distances.npz")
+                indices_files.append(f"preprocessing/{ep_fol}/indices_and_distances.npz")
         # actual loading...
         count_droid = 0
         count_collected_demos = 0
         for file_path in indices_files:
             indices_and_dists = np.load(file_path)
-            query_indices, retrieved_indices = indices_and_dists["query_indices"], indices_and_dists["retrieved_indices"][:, :num_retrieved_observations, :]
-            distances = np.concatenate((indices_and_dists["distances"][:, :num_retrieved_observations], indices_and_dists["distances"][:, -1:]), axis=1)
+            query_indices = indices_and_dists["query_indices"]
+            retrieved_indices = indices_and_dists["retrieved_indices"][:, :num_retrieved_observations, :]
+            distances = np.concatenate(
+                (
+                    indices_and_dists["distances"][:, :num_retrieved_observations],
+                    indices_and_dists["distances"][:, -1:],
+                ),
+                axis=1,
+            )
             num_steps = query_indices.shape[0]
-            assert retrieved_indices.shape == (num_steps, num_retrieved_observations, 2) and retrieved_indices.dtype == np.int32 
+            assert retrieved_indices.shape == (num_steps, num_retrieved_observations, 2) and retrieved_indices.dtype == np.int32
             assert query_indices.shape == (num_steps, 2) and query_indices.dtype == np.int32
             all_retrieved_indices.append(retrieved_indices)
             all_query_indices.append(query_indices)
@@ -206,36 +248,50 @@ class RiclDroidDataset(Dataset):
         len_dataset = all_retrieved_indices.shape[0]
         print(f"len_dataset: {len_dataset}")
         assert len_dataset == count_droid + count_collected_demos
-        assert all_retrieved_indices.shape == (len_dataset, num_retrieved_observations, 2) and all_retrieved_indices.dtype == np.int32
+        assert (
+            all_retrieved_indices.shape == (len_dataset, num_retrieved_observations, 2)
+            and all_retrieved_indices.dtype == np.int32
+        )
         assert all_query_indices.shape == (len_dataset, 2) and all_query_indices.dtype == np.int32
-        assert all_distances.shape == (len_dataset, num_retrieved_observations + 1) and all_distances.dtype == np.float64
-        
+        assert (
+            all_distances.shape == (len_dataset, num_retrieved_observations + 1)
+            and all_distances.dtype == np.float64
+        )
+
         # normalize all_distances and convert to float32
-        max_dist_value = json.load(open(f"assets/max_distance.json", 'r'))['distances']['max']
+        max_dist_value = json.load(open("assets/max_distance.json", "r"))["distances"]["max"]
         if finetuning_collected_demos_dir is None:
-            assert max_dist_value == np.max(all_distances), f"{max_dist_value=} from norm stats time does not match {np.max(all_distances)=} from dataset"
-            print(f'max distance value: {max_dist_value}')
+            print(f"max distance value: {max_dist_value}")
         all_distances = all_distances / max_dist_value
         all_distances = all_distances.astype(np.float32)
 
-        # load all data paths 
-        ds_name = f"droid_new"
-        ds_fol = f"ricl_droid_preprocessing/{ds_name}_broken_up"
-        all_ep_idxs = list(np.unique(all_retrieved_indices[:, :, 0])) + list(np.unique(all_query_indices[:, 0]))
-        all_ep_data_paths = {ep_idx: 
-                                    f"{ds_fol}/episode_{ep_idx}.npz" 
-                                    if ep_idx < 100000 else 
-                                    f"ricl_droid_preprocessing/{collected_demos_infos['ep_idxs_to_fol'][str(ep_idx)]}/processed_demo.npz"
-                            for ep_idx in all_ep_idxs}
-        all_ep_prompts = {ep_idx: 
-                                    json.load(open(f"{ds_fol}/episode_{ep_idx}.json"))["language_instruction"]  
-                                    if ep_idx < 100000 else 
-                                    " ".join(collected_demos_infos['ep_idxs_to_fol'][str(ep_idx)].split("/")[1].split("_")[1:])
-                            for ep_idx in all_ep_idxs}
-        
+        # load all data paths
+        ds_name = "droid_new"
+        ds_fol = f"preprocessing/{ds_name}_broken_up"
+        all_ep_idxs = list(np.unique(all_retrieved_indices[:, :, 0])) + list(
+            np.unique(all_query_indices[:, 0])
+        )
+        all_ep_data_paths = {
+            ep_idx: (
+                f"{ds_fol}/episode_{ep_idx}.npz"
+                if ep_idx < 100000
+                else f"preprocessing/{collected_demos_infos['ep_idxs_to_fol'][str(ep_idx)]}/processed_demo.npz"
+            )
+            for ep_idx in all_ep_idxs
+        }
+        all_ep_prompts = {
+            ep_idx: (
+                json.load(open(f"{ds_fol}/episode_{ep_idx}.json"))["language_instruction"]
+                if ep_idx < 100000
+                else " ".join(collected_demos_infos["ep_idxs_to_fol"][str(ep_idx)].split("/")[1].split("_")[1:])
+            )
+            for ep_idx in all_ep_idxs
+        }
+
         # if all episode prompts are the same, print the first prompt
-        if all(all_ep_prompts[ep_idx] == all_ep_prompts[list(all_ep_prompts.keys())[0]] for ep_idx in all_ep_prompts):
-            print(f"all {len(all_ep_prompts)} episode prompts are the same: {all_ep_prompts[list(all_ep_prompts.keys())[0]]}")
+        first_prompt_key = list(all_ep_prompts.keys())[0]
+        if all(all_ep_prompts[ep_idx] == all_ep_prompts[first_prompt_key] for ep_idx in all_ep_prompts):
+            print(f"all {len(all_ep_prompts)} episode prompts are the same: {all_ep_prompts[first_prompt_key]}")
 
         # save
         self.len_dataset = len_dataset
@@ -251,7 +307,7 @@ class RiclDroidDataset(Dataset):
     def __getitem__(self, index: SupportsIndex) -> dict:
         retrieved_indices = self.all_retrieved_indices[index, :, :]
         query_ep_idx, query_step_idx = self.all_query_indices[index, :]
-        
+
         ep_idxs = list(np.unique(retrieved_indices[:, 0])) + [query_ep_idx]
         ep_data = {ep_idx: np.load(self.all_ep_data_paths[ep_idx]) for ep_idx in ep_idxs}
         data = {}
@@ -262,29 +318,61 @@ class RiclDroidDataset(Dataset):
                 data[f"{prefix}top_image"] = ep_data[ep_idx]["observation__exterior_image_1_left"][step_idx]
                 data[f"{prefix}right_image"] = ep_data[ep_idx]["observation__exterior_image_2_left"][step_idx]
                 data[f"{prefix}wrist_image"] = ep_data[ep_idx]["observation__wrist_image_left"][step_idx]
-                data[f"{prefix}state"] = np.concatenate([ep_data[ep_idx]["observation__joint_position"][step_idx], ep_data[ep_idx]["observation__gripper_position"][step_idx]], axis=0)
-                data[f"{prefix}actions"] = get_action_chunk(ep_data[ep_idx]["action_dict__joint_velocity"], ep_data[ep_idx]["action_dict__gripper_position"], step_idx, self.action_horizon)
+                data[f"{prefix}state"] = np.concatenate(
+                    [
+                        ep_data[ep_idx]["observation__joint_position"][step_idx],
+                        ep_data[ep_idx]["observation__gripper_position"][step_idx],
+                    ],
+                    axis=0,
+                )
+                data[f"{prefix}actions"] = get_action_chunk(
+                    ep_data[ep_idx]["action_dict__joint_velocity"],
+                    ep_data[ep_idx]["action_dict__gripper_position"],
+                    step_idx,
+                    self.action_horizon,
+                )
             else:
                 data[f"{prefix}top_image"] = ep_data[ep_idx]["top_image"][step_idx]
                 data[f"{prefix}right_image"] = ep_data[ep_idx]["right_image"][step_idx]
                 data[f"{prefix}wrist_image"] = ep_data[ep_idx]["wrist_image"][step_idx]
                 data[f"{prefix}state"] = ep_data[ep_idx]["state"][step_idx]
-                data[f"{prefix}actions"] = get_action_chunk(ep_data[ep_idx]["actions"][:, :-1], ep_data[ep_idx]["actions"][:, -1:], step_idx, self.action_horizon)
+                data[f"{prefix}actions"] = get_action_chunk(
+                    ep_data[ep_idx]["actions"][:, :-1],
+                    ep_data[ep_idx]["actions"][:, -1:],
+                    step_idx,
+                    self.action_horizon,
+                )
             data[f"{prefix}prompt"] = self.all_ep_prompts[ep_idx]
-        
+
         prefix = "query_"
         if query_ep_idx < 100000:
             data[f"{prefix}top_image"] = ep_data[query_ep_idx]["observation__exterior_image_1_left"][query_step_idx]
             data[f"{prefix}right_image"] = ep_data[query_ep_idx]["observation__exterior_image_2_left"][query_step_idx]
             data[f"{prefix}wrist_image"] = ep_data[query_ep_idx]["observation__wrist_image_left"][query_step_idx]
-            data[f"{prefix}state"] = np.concatenate([ep_data[query_ep_idx]["observation__joint_position"][query_step_idx], ep_data[query_ep_idx]["observation__gripper_position"][query_step_idx]], axis=0)
-            data[f"{prefix}actions"] = get_action_chunk(ep_data[query_ep_idx]["action_dict__joint_velocity"], ep_data[query_ep_idx]["action_dict__gripper_position"], query_step_idx, self.action_horizon)
+            data[f"{prefix}state"] = np.concatenate(
+                [
+                    ep_data[query_ep_idx]["observation__joint_position"][query_step_idx],
+                    ep_data[query_ep_idx]["observation__gripper_position"][query_step_idx],
+                ],
+                axis=0,
+            )
+            data[f"{prefix}actions"] = get_action_chunk(
+                ep_data[query_ep_idx]["action_dict__joint_velocity"],
+                ep_data[query_ep_idx]["action_dict__gripper_position"],
+                query_step_idx,
+                self.action_horizon,
+            )
         else:
             data[f"{prefix}top_image"] = ep_data[query_ep_idx]["top_image"][query_step_idx]
             data[f"{prefix}right_image"] = ep_data[query_ep_idx]["right_image"][query_step_idx]
             data[f"{prefix}wrist_image"] = ep_data[query_ep_idx]["wrist_image"][query_step_idx]
             data[f"{prefix}state"] = ep_data[query_ep_idx]["state"][query_step_idx]
-            data[f"{prefix}actions"] = get_action_chunk(ep_data[query_ep_idx]["actions"][:, :-1], ep_data[query_ep_idx]["actions"][:, -1:], query_step_idx, self.action_horizon)
+            data[f"{prefix}actions"] = get_action_chunk(
+                ep_data[query_ep_idx]["actions"][:, :-1],
+                ep_data[query_ep_idx]["actions"][:, -1:],
+                query_step_idx,
+                self.action_horizon,
+            )
         data[f"{prefix}prompt"] = self.all_ep_prompts[query_ep_idx]
 
         if self.use_action_interpolation:

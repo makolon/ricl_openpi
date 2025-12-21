@@ -66,8 +66,10 @@ Similarly, for retrieval data in a new task at test time, we expect the followin
 
 ## Downloading our datasets
 Priming (training) data: `git clone https://huggingface.co/datasets/ricl-vla/collected_demos_training ./preprocessing/collected_demos_training`
+Pull datasets using git lfs: `cd ./preprocessing/collected_demos_training && git lfs pull`
 
 Retrieval (testing) data in many new tasks: `git clone https://huggingface.co/datasets/ricl-vla/collected_demos ./preprocessing/collected_demos`
+Pull datasets using git lfs: `cd ./preprocessing/collected_demos && git lfs pull`
 
 Both of the above can also be found at [this huggingface link](https://huggingface.co/ricl-vla).
 
@@ -96,7 +98,7 @@ python scripts/setup_norm_states_for_ricl.py
 
 * Create RICL-Pi0-FAST-DROID
 ```bash
-python scripts/train_pi0_fast_ricl.py pi0_fast_droid_ricl --exp-name={YOUR_EXPERIMENT_NAME_HERE} --overwrite
+python scripts/train_pi0_fast_ricl.py pi0_fast_droid_ricl --exp-name={YOUR_EXPERIMENT_NAME_HERE} --overwrite --batch_size 4
 ```
 
 ## Serving RICL-Pi0-FAST-DROID in a new task
@@ -127,7 +129,7 @@ python retrieve_within_collected_demo_groups.py --folder_name=collected_demos
 
 * Create RICL-Pi0-FAST-DROID-Finetuned
 ```bash
-python scripts/train_pi0_fast_ricl.py pi0_fast_droid_ricl___finetune_on_new_task --exp-name={YOUR_EXPERIMENT_NAME_HERE} --overwrite
+python scripts/train_pi0_fast_ricl.py pi0_fast_droid_ricl___finetune_on_new_task --exp-name={YOUR_EXPERIMENT_NAME_HERE} --overwrite --batch_size 4
 ```
 Please make sure the config of `pi0_fast_droid_ricl___finetune_on_new_task` in `src/training/config.py` points to the correct retrieval demos folder that you would like to finetune on.
 

@@ -12,8 +12,9 @@ import openpi.shared.download as download
 from openpi.training import checkpoints as _checkpoints
 from openpi.training import config as _config
 import openpi.transforms as transforms
-import logging
+
 logger = logging.getLogger()
+
 
 @dataclasses.dataclass
 class PolicyConfig:
@@ -54,7 +55,9 @@ def create_trained_policy(
     checkpoint_dir = download.maybe_download(str(checkpoint_dir))
 
     logging.info("Loading model...")
-    model = train_config.model.load(_model.restore_params(checkpoint_dir / "params", dtype=jnp.bfloat16))
+    model = train_config.model.load(
+        _model.restore_params(checkpoint_dir / "params", dtype=jnp.bfloat16)
+    )
 
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
     if norm_stats is None:
@@ -104,7 +107,9 @@ def create_trained_ricl_policy(
         retrieval_seed: Seed for random retrieval (when applicable).
     """
     logging.info("Loading model...")
-    model = train_config.model.load(_model.restore_params(f"{checkpoint_dir}/params", dtype=jnp.bfloat16))
+    model = train_config.model.load(
+        _model.restore_params(f"{checkpoint_dir}/params", dtype=jnp.bfloat16)
+    )
 
     data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
     if norm_stats is None:
