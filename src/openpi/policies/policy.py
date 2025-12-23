@@ -173,6 +173,15 @@ class RiclPolicy(BasePolicy):
         self._blank_state = np.zeros_like(sample_demo["state"][0])
         self._blank_actions = np.zeros((self._action_horizon, self._action_dim), dtype=np.float32)
 
+    def _fill_blank_slot(self, more_obs: dict, ct: int) -> None:
+        """Populate the ct-th retrieval slot with blank observations."""
+        more_obs[f"retrieved_{ct}_top_image"] = self._blank_top_image
+        more_obs[f"retrieved_{ct}_right_image"] = self._blank_right_image
+        more_obs[f"retrieved_{ct}_wrist_image"] = self._blank_wrist_image
+        more_obs[f"retrieved_{ct}_state"] = self._blank_state
+        more_obs[f"retrieved_{ct}_actions"] = self._blank_actions
+        more_obs[f"retrieved_{ct}_prompt"] = self._blank_prompt
+
     def _select_retrieved_indices(
         self, strategy: RetrievalStrategy, query_embedding: np.ndarray | None
     ) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -202,12 +211,7 @@ class RiclPolicy(BasePolicy):
         """Build empty retrieval slots to simulate 'no context'."""
         more_obs: dict[str, Any] = {"inference_time": True}
         for ct in range(self._knn_k):
-            more_obs[f"retrieved_{ct}_top_image"] = self._blank_top_image
-            more_obs[f"retrieved_{ct}_right_image"] = self._blank_right_image
-            more_obs[f"retrieved_{ct}_wrist_image"] = self._blank_wrist_image
-            more_obs[f"retrieved_{ct}_state"] = self._blank_state
-            more_obs[f"retrieved_{ct}_actions"] = self._blank_actions
-            more_obs[f"retrieved_{ct}_prompt"] = self._blank_prompt
+            self._fill_blank_slot(more_obs, ct)
         if self._use_action_interpolation:
             exp_lamda = np.zeros((self._knn_k + 1, 1), dtype=np.float32)
             exp_lamda[-1, 0] = 1.0  # let the query dominate when no context is provided
@@ -216,6 +220,10 @@ class RiclPolicy(BasePolicy):
 
     def retrieve(self, obs: dict) -> dict:
         more_obs = {"inference_time": True}
+        requested_count = obs.pop("retrieval_count", self._knn_k)
+        retrieved_count = self._knn_k if requested_count is None else int(requested_count)
+        if not (0 <= retrieved_count <= self._knn_k):
+            raise ValueError(f"retrieval_count should be in [0, {self._knn_k}], got {retrieved_count}")
         # Choose retrieval strategy (can be overridden per-request)
         strategy_value = obs.pop("retrieval_strategy", self._retrieval_strategy)
         strategy = (
@@ -223,7 +231,7 @@ class RiclPolicy(BasePolicy):
             if isinstance(strategy_value, RetrievalStrategy)
             else RetrievalStrategy(strategy_value)
         )
-        if strategy is RetrievalStrategy.NONE:
+        if strategy is RetrievalStrategy.NONE or retrieved_count == 0:
             return {**obs, **self._build_blank_retrieval()}
 
         # embed
@@ -234,17 +242,25 @@ class RiclPolicy(BasePolicy):
         assert retrieved_indices is not None, "retrieved_indices should not be None for non-NONE strategy"
         assert retrieved_indices.shape == (1, self._knn_k, 2), f"{retrieved_indices.shape=}"
         # collect retrieved info
-        for ct, (ep_idx, step_idx) in enumerate(retrieved_indices[0]):
-            for key in ["state", "wrist_image", "top_image", "right_image"]:
-                more_obs[f"retrieved_{ct}_{key}"] = self._demos[ep_idx][key][step_idx]
-            more_obs[f"retrieved_{ct}_actions"] = get_action_chunk_at_inference_time(self._demos[ep_idx]["actions"], step_idx, self._action_horizon)
-            more_obs[f"retrieved_{ct}_prompt"] = self._demos[ep_idx]["prompt"].item()
+        for ct in range(self._knn_k):
+            if ct < retrieved_count:
+                ep_idx, step_idx = retrieved_indices[0, ct]
+                for key in ["state", "wrist_image", "top_image", "right_image"]:
+                    more_obs[f"retrieved_{ct}_{key}"] = self._demos[ep_idx][key][step_idx]
+                more_obs[f"retrieved_{ct}_actions"] = get_action_chunk_at_inference_time(self._demos[ep_idx]["actions"], step_idx, self._action_horizon)
+                more_obs[f"retrieved_{ct}_prompt"] = self._demos[ep_idx]["prompt"].item()
+            else:
+                self._fill_blank_slot(more_obs, ct)
         # Compute exp_lamda_distances if use_action_interpolation
         if self._use_action_interpolation:
             first_embedding = self._demos[retrieved_indices[0, 0, 0]]["top_image_embeddings"][retrieved_indices[0, 0, 1]]
-            distances = [0.0] + [np.linalg.norm(self._demos[ep_idx]["top_image_embeddings"][step_idx:step_idx+1] - first_embedding) for ep_idx, step_idx in retrieved_indices[0, 1:]]
-            distances.append(np.linalg.norm(query_embedding - first_embedding))
-            distances = np.clip(np.array(distances), 0, self._max_dist) / self._max_dist
+            distances = np.full((self._knn_k + 1,), self._max_dist, dtype=np.float32)
+            distances[0] = 0.0
+            for idx in range(1, retrieved_count):
+                ep_idx, step_idx = retrieved_indices[0, idx]
+                distances[idx] = np.linalg.norm(self._demos[ep_idx]["top_image_embeddings"][step_idx:step_idx+1] - first_embedding)
+            distances[-1] = np.linalg.norm(query_embedding - first_embedding)
+            distances = np.clip(distances, 0, self._max_dist) / self._max_dist
             print(f'distances: {distances}')
             more_obs["exp_lamda_distances"] = np.exp(-self._lamda * distances).reshape(-1, 1)
             print(f'exp_lamda_distances: {more_obs["exp_lamda_distances"]}')
@@ -330,6 +346,10 @@ class RiclPolicy(BasePolicy):
     @property
     def metadata(self) -> dict[str, Any]:
         return self._metadata
+
+    @property
+    def num_retrieved_observations(self) -> int:
+        return self._knn_k
 
 
 class PolicyRecorder(_base_policy.BasePolicy):
